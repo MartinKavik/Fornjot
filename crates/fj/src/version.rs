@@ -1,6 +1,6 @@
 //! API for checking compatibility between the Fornjot app and a model
 
-use core::slice;
+use std::{ffi::CString, os::raw::c_char, ptr};
 
 /// The Fornjot package version
 ///
@@ -24,13 +24,7 @@ pub static VERSION_FULL: &str = env!("FJ_VERSION_FULL");
 /// Used by the Fornjot application to check for compatibility between a model
 /// and the app.
 #[repr(C)]
-pub struct RawVersion {
-    /// The pointer to the `str`
-    pub ptr: *const u8,
-
-    /// The length of the `str`
-    pub len: usize,
-}
+pub struct RawVersion(*mut c_char);
 
 impl RawVersion {
     /// Convert the `RawVersion` into a string
@@ -39,25 +33,34 @@ impl RawVersion {
     ///
     /// Must be a `RawVersion` returned from one of the hidden version functions
     /// in this module.
-    #[allow(clippy::inherent_to_string)]
-    pub unsafe fn to_string(&self) -> String {
-        let slice = slice::from_raw_parts(self.ptr, self.len);
-        String::from_utf8_lossy(slice).into_owned()
+    pub fn into_string(mut self) -> String {
+        let version = unsafe { CString::from_raw(self.0) };
+        self.0 = ptr::null_mut();
+        version
+            .into_string()
+            .expect("Failed to convert RawVersion into String")
+    }
+}
+
+impl Drop for RawVersion {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // Retake pointer to free memory
+            unsafe { CString::from_raw(self.0) };
+        }
     }
 }
 
 #[no_mangle]
 extern "C" fn version_pkg() -> RawVersion {
-    RawVersion {
-        ptr: VERSION_PKG.as_ptr(),
-        len: VERSION_PKG.len(),
-    }
+    let version = CString::new(VERSION_PKG)
+        .expect("Failed to convert VERSION_PKG to CString");
+    RawVersion(version.into_raw())
 }
 
 #[no_mangle]
 extern "C" fn version_full() -> RawVersion {
-    RawVersion {
-        ptr: VERSION_FULL.as_ptr(),
-        len: VERSION_FULL.len(),
-    }
+    let version = CString::new(VERSION_FULL)
+        .expect("Failed to convert VERSION_FULL to CString");
+    RawVersion(version.into_raw())
 }
